@@ -40,7 +40,7 @@ func Success(c *gin.Context, statusCode int, data interface{}) {
 	})
 }
 
-// Error sends an error response
+// sends an error response
 func Error(c *gin.Context, err error) {
 	var statusCode int
 	var errorResponse interface{}
