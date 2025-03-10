@@ -1,0 +1,58 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.out
+
+# Dependency directories
+vendor/
+credentials
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment variables
+.env
+.env.local
+
+# Firebase credentials
+credentials/*.json
+!credentials/firebase-service-account-example.json
+
+# Build/Output directories
+bin/
+tmp/
+dist/
+out/
+
+# Logs
+logs/
+*.log
+
+# Swagger generated files
+docs/swagger/
+
+# Vercel
+.vercel
+
+# Node modules (if any front-end tooling)
+node_modules/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

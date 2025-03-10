@@ -1,0 +1,113 @@
+.
+├── .air.toml
+├── api
+│   ├── index.go
+│   ├── middleware
+│   │   └── middleware.go
+│   └── route
+│       ├── health.route.go
+│       ├── route.go
+│       └── swagger.go
+├── app
+│   ├── core
+│   │   ├── entity
+│   │   │   └── entity.go
+│   │   └── interfaces
+│   │       ├── repository.go
+│   │       └── service.go
+│   └── module
+│       └── health
+│           ├── dto
+│           │   └── health.dto.go
+│           ├── handler
+│           │   └── health.handler.go
+│           └── service
+│               └── health.service.go
+├── build
+│   └── api
+├── cmd
+│   └── api
+│       └── main.go
+├── configs
+│   └── config.go
+├── credentials
+│   └── firebase-service-account.json
+├── docker-compose.yml
+├── Dockerfile
+├── docs
+│   └── swagger
+│       ├── docs.go
+│       ├── swagger.json
+│       └── swagger.yaml
+├── .env
+├── flatten.sh
+├── .github
+│   └── workflows
+│       ├── dev.yml
+│       └── prod.yml
+├── .gitignore
+├── go.mod
+├── go.sum
+├── infrastructure
+│   ├── firebase
+│   │   └── client.go
+│   └── logger
+│       └── logger.go
+├── Makefile
+├── out
+│   ├── .air.toml
+│   ├── client.go
+│   ├── config.go
+│   ├── dev.yml
+│   ├── docker-compose.yml
+│   ├── Dockerfile
+│   ├── docs.go
+│   ├── entity.go
+│   ├── entrypoint.go
+│   ├── errors.go
+│   ├── firebase-service-account.json
+│   ├── flatten.sh
+│   ├── .gitignore
+│   ├── go.mod
+│   ├── go.sum
+│   ├── go.work
+│   ├── go.work.sum
+│   ├── health.dto.go
+│   ├── health.handler.go
+│   ├── health.route.go
+│   ├── health.service.go
+│   ├── index.go
+│   ├── logger.go
+│   ├── main.go
+│   ├── Makefile
+│   ├── middleware.go
+│   ├── prod.yml
+│   ├── project.json
+│   ├── README.txt
+│   ├── repository.go
+│   ├── response.go
+│   ├── route.go
+│   ├── service.go
+│   ├── swagger.go
+│   ├── swagger.json
+│   ├── swagger.sh
+│   ├── swagger.yaml
+│   ├── vercel-dev-server-go
+│   ├── vercel-dev-server-main.go
+│   └── vercel.json
+├── out.txt
+├── pkg
+│   └── common
+│       ├── errors
+│       │   └── errors.go
+│       └── response
+│           └── response.go
+├── scripts
+│   ├── flatten.sh
+│   └── swagger.sh
+├── tmp
+│   ├── build-errors.log
+│   └── main
+└── vercel.json
+
+32 directories, 79 files

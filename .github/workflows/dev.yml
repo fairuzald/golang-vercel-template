@@ -1,0 +1,536 @@
+name: 🚀 Development CI/CD Pipeline
+
+env:
+  GO_VERSION: '1.21'
+  FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+  APP_ENV: development
+
+on:
+  pull_request:
+    branches: ['dev']
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - 'LICENSE'
+      - 'docs/**'
+      - '**.txt'
+  push:
+    branches:
+      - dev
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - 'LICENSE'
+      - 'docs/**'
+      - '**.txt'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  initialize:
+    name: 🎯 Initialize Build Environment
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      commit-message: ${{ steps.get-commit-message.outputs.message }}
+      branch-name: ${{ steps.get-branch-info.outputs.branch }}
+      pr-title: ${{ steps.get-pr-info.outputs.title }}
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: 🔍 Get Commit Information
+        id: get-commit-message
+        run: |
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          echo "message<<EOF" >> $GITHUB_OUTPUT
+          echo "$COMMIT_MSG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: 🔍 Get Branch Information
+        id: get-branch-info
+        run: |
+          echo "branch=${{ github.head_ref || github.ref_name }}" >> $GITHUB_OUTPUT
+
+      - name: 🔍 Get PR Information
+        id: get-pr-info
+        run: |
+          echo "title=${{ github.event.pull_request.title }}" >> $GITHUB_OUTPUT
+
+  deploy:
+    name: 🚀 Build and Deploy to Development
+    needs: [initialize]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      deployment_url: ${{ steps.set-outputs.outputs.url }}
+      preview_domain: ${{ steps.set-outputs.outputs.preview_domain }}
+    environment:
+      name: development
+      url: ${{ steps.set-outputs.outputs.url }}
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: 🛠️ Install Vercel CLI
+        run: npm install -g vercel@latest
+
+      - name: 📦 Prepare for Deployment
+        run: |
+          # Only show directory structure, not file contents
+          echo "Project directory structure:"
+          find . -type d -not -path "*/\.*" -not -path "*/node_modules/*" | sort
+
+      - name: 🚀 Deploy to Vercel
+        id: deploy-vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          # Create .vercel directory and project config
+          mkdir -p .vercel
+          echo "{\"orgId\":\"$VERCEL_ORG_ID\",\"projectId\":\"$VERCEL_PROJECT_ID\"}" > .vercel/project.json
+
+          # Define the PR-specific preview domain
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          # CHANGES THIS TO YOUR DOMAIN
+          PREVIEW_DOMAIN="pr-${PR_NUMBER}-skillup-api.vercel.app"
+
+          # List files before deployment (without showing contents)
+          echo "Files being deployed from directories:"
+          find . -type d -maxdepth 2 | sort
+
+          # Deploy to Vercel and capture output (without showing token)
+          echo "Deploying to Vercel..."
+          vercel --token "$VERCEL_TOKEN" > deployment_output.txt 2>&1
+          DEPLOYMENT_URL=$(grep -o 'https://[^ ]*\.vercel\.app' deployment_output.txt | head -1)
+
+          # Set alias for easier access
+          echo "Setting alias: $PREVIEW_DOMAIN"
+          vercel alias set "$DEPLOYMENT_URL" "$PREVIEW_DOMAIN" --token "$VERCEL_TOKEN" || true
+
+          # Save the output for the next step
+          echo "DEPLOYMENT_URL=$DEPLOYMENT_URL" >> $GITHUB_ENV
+          echo "PREVIEW_DOMAIN=$PREVIEW_DOMAIN" >> $GITHUB_ENV
+
+          cp deployment_output.txt /tmp/vercel_output.txt
+
+      - name: Set Outputs
+        id: set-outputs
+        run: |
+          # Use the preview domain as the URL for consistent access
+          PREVIEW_URL="https://$PREVIEW_DOMAIN"
+
+          echo "url=$PREVIEW_URL" >> $GITHUB_OUTPUT
+          echo "preview_domain=$PREVIEW_DOMAIN" >> $GITHUB_OUTPUT
+
+          echo "Outputs set with Preview URL: $PREVIEW_URL"
+
+      - name: 📝 Comment on PR, Link Issues, and Create PR-specific Deployment Issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const formatDate = () => {
+              const options = {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: 'numeric',
+                minute: 'numeric',
+                hour12: false,
+                timeZone: 'Asia/Jakarta'
+              };
+              return new Date().toLocaleString('en-US', options) + ' (GMT+7)';
+            };
+
+            const getBuildDuration = () => {
+              try {
+                const startTime = new Date(context.payload.repository.updated_at);
+                const endTime = new Date();
+                return Math.round((endTime - startTime) / 1000 / 60);
+              } catch (error) {
+                return 0;
+              }
+            };
+
+            const commitMsg = '${{ needs.initialize.outputs.commit-message }}';
+            const branchName = '${{ needs.initialize.outputs.branch-name }}';
+            const prTitle = '${{ needs.initialize.outputs.pr-title }}';
+            const previewUrl = 'https://${{ env.PREVIEW_DOMAIN }}';
+            const deploymentUrl = '${{ env.DEPLOYMENT_URL }}';
+            const prNumber = context.issue.number;
+
+            const extractIssueNumbers = (text) => {
+              const issueRegex = /(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved|for)?\s*#(\d+)/gi;
+              const matches = [];
+              let match;
+
+              while ((match = issueRegex.exec(text)) !== null) {
+                matches.push(match[1]);
+              }
+
+              return [...new Set(matches)]; // Remove duplicates
+            };
+
+            const issueNumbers = [
+              ...extractIssueNumbers(prTitle),
+              ...extractIssueNumbers(commitMsg)
+            ];
+
+            const issueRefs = issueNumbers.length > 0
+              ? '## 🔄 Linked Issues\n' + issueNumbers.map(num => `- #${num}`).join('\n')
+              : '';
+
+            const deploymentComment = `
+            # 🚀 Development Deployment
+
+            ## 📌 Deployment Information
+            | Category | Details |
+            |----------|---------|
+            | 🌿 Branch | \`${branchName}\` |
+            | 📝 PR Title | ${prTitle} |
+            | 🏷️ Environment | Development |
+            | 🔗 PR Preview URL | [Visit PR Preview](${previewUrl}) |
+            | 🔗 Unique Deployment URL | [Visit Deployment](${deploymentUrl}) |
+            | 🔍 Build Logs | [View Logs](${context.payload.repository.html_url}/actions/runs/${context.runId}) |
+
+            ${issueRefs}
+
+            ## 📝 Latest Changes
+            \`\`\`
+            ${commitMsg}
+            \`\`\`
+
+            ## 🔍 Deployment Details
+            - **Commit:** [\`${context.sha.slice(0, 7)}\`](${context.payload.repository.html_url}/commit/${context.sha})
+            - **Build Status:** ✅ Success
+            - **Environment:** Development
+            - **Go Version:** ${{ env.GO_VERSION }}
+
+            > 🕒 Deployed at: ${formatDate()}
+            `;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: deploymentComment
+            });
+
+            const deploymentEntry = {
+              date: formatDate(),
+              commit: context.sha.slice(0, 7),
+              message: commitMsg,
+              pr: prNumber,
+              branch: branchName,
+              status: '✅',
+              url: deploymentUrl || previewUrl,
+              logs_url: `${context.payload.repository.html_url}/actions/runs/${context.runId}`,
+              duration: getBuildDuration()
+            };
+
+            for (const issueNum of issueNumbers) {
+              try {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: parseInt(issueNum),
+                  body: `Linked to PR #${prNumber} which will close this issue when merged.`
+                });
+
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: parseInt(issueNum),
+                  labels: ['in-progress', `pr-${prNumber}`]
+                });
+
+                console.log(`Linked issue #${issueNum} to PR #${prNumber} and added labels`);
+              } catch (error) {
+                console.log(`Error processing issue #${issueNum}: ${error.message}`);
+              }
+            }
+
+            if (issueNumbers.length > 0) {
+              try {
+                const labels = ['has-linked-issues'];
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  labels: labels
+                });
+              } catch (error) {
+                console.log(`Error adding labels to PR: ${error.message}`);
+              }
+            }
+
+            try {
+              const prSpecificIssueTitle = `🚀 PR #${prNumber} Deployment History: ${prTitle.slice(0, 50)}`;
+
+              const issues = await github.rest.issues.listForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                labels: [`pr-${prNumber}-deployments`]
+              });
+
+              const existingPrIssue = issues.data.find(issue =>
+                issue.title.includes(`PR #${prNumber} Deployment History`)
+              );
+
+              let previousDeployments = [];
+              if (existingPrIssue) {
+                const deploymentTableRegex = /\| (.*?) \| \[(.*?)\].*? \| (.*?) \| (.*?) \| (.*?) \| (.*?) \|/g;
+                let match;
+                const existingContent = existingPrIssue.body;
+
+                while ((match = deploymentTableRegex.exec(existingContent)) !== null) {
+                  previousDeployments.push({
+                    date: match[1],
+                    commit: match[2],
+                    message: match[3],
+                    status: match[4],
+                    url: match[5],
+                    logs_url: match[6]
+                  });
+                }
+              }
+
+              const allDeployments = [
+                {
+                  date: deploymentEntry.date,
+                  commit: deploymentEntry.commit,
+                  message: deploymentEntry.message,
+                  status: deploymentEntry.status,
+                  url: deploymentEntry.url,
+                  logs_url: deploymentEntry.logs_url
+                },
+                ...previousDeployments
+              ];
+
+              const prDeploymentHistory = `
+              # 🚀 Deployment History for PR #${prNumber}
+
+              ## 📌 Pull Request Information
+              | Category | Details |
+              |----------|---------|
+              | 🌿 Branch | \`${branchName}\` |
+              | 📝 PR Title | [${prTitle}](${context.payload.repository.html_url}/pull/${prNumber}) |
+              | 🏷️ Environment | Development |
+              | 🔗 PR Preview URL | [${previewUrl}](${previewUrl}) |
+
+              ${issueRefs}
+
+              ## 📌 Latest Deployment
+              - **Status:** ✅ Success
+              - **Deployment URL:** [${deploymentEntry.url}](${deploymentEntry.url})
+              - **Commit:** [\`${deploymentEntry.commit}\`](${context.payload.repository.html_url}/commit/${context.sha})
+              - **Time:** ${deploymentEntry.date}
+              - **Duration:** ${deploymentEntry.duration} minutes
+
+              ## 📊 Deployment History
+              | Date | Commit | Changes | Status | URL | Logs |
+              |------|--------|---------|--------|-----|------|
+              ${allDeployments.map(d =>
+                `| ${d.date} | [\`${d.commit}\`](${context.payload.repository.html_url}/commit/${d.commit}) | ${d.message.split('\n')[0].slice(0, 50)}${d.message.length > 50 ? '...' : ''} | ${d.status} | [View](${d.url}) | [Logs](${d.logs_url}) |`
+              ).join('\n')}
+
+              ## 🔄 Environment Information
+              - **Go Version:** ${{ env.GO_VERSION }}
+              - **Environment:** Development
+              - **Project:** GolangTemplate API
+
+              > 🕒 Last Updated: ${formatDate()}
+
+              <!-- This issue will be automatically closed when PR #${prNumber} is merged or closed -->
+              `;
+
+              if (existingPrIssue) {
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: existingPrIssue.number,
+                  body: prDeploymentHistory
+                });
+                console.log(`Updated PR #${prNumber} deployment history issue #${existingPrIssue.number}`);
+              } else {
+                const newPrIssue = await github.rest.issues.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  title: prSpecificIssueTitle,
+                  body: prDeploymentHistory,
+                  labels: [`pr-${prNumber}-deployments`, 'deployment', 'development', `branch-${branchName.replace(/[^a-zA-Z0-9-]/g, '-')}`]
+                });
+                console.log(`Created PR #${prNumber} deployment history issue #${newPrIssue.data.number}`);
+
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  body: `📊 Created deployment history issue for this PR: #${newPrIssue.data.number}`
+                });
+              }
+
+              await updateGlobalDeploymentHistory(github, context, deploymentEntry);
+
+            } catch (error) {
+              console.log(`Error handling PR-specific deployment issue: ${error.message}`);
+            }
+
+            async function updateGlobalDeploymentHistory(github, context, deploymentEntry) {
+              try {
+                const issueTitle = '📊 Development Deployment History';
+
+                const issues = await github.rest.issues.listForRepo({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  state: 'open',
+                  labels: ['development-deployments']
+                });
+
+                const existingIssue = issues.data.find(issue =>
+                  issue.title === issueTitle
+                );
+
+                let previousDeployments = [];
+                if (existingIssue) {
+                  const deploymentTableRegex = /\| (.*?) \| \[(.*?)\].*? \| (.*?) \| #(\d+) \| \`(.*?)\` \| (.*?) \| (.*?) \| (.*?) \| (\d+) \|/g;
+                  let match;
+                  const existingContent = existingIssue.body;
+
+                  while ((match = deploymentTableRegex.exec(existingContent)) !== null) {
+                    previousDeployments.push({
+                      date: match[1],
+                      commit: match[2],
+                      message: match[3],
+                      pr: match[4],
+                      branch: match[5],
+                      status: match[6],
+                      url: match[7],
+                      logs_url: match[8],
+                      duration: match[9]
+                    });
+                  }
+
+                  previousDeployments = previousDeployments.slice(0, 19);
+                }
+
+                const allDeployments = [deploymentEntry, ...previousDeployments];
+
+                const deploymentHistory = `
+                # 📊 Development Deployment History
+
+                ## 📌 Latest Deployment
+                - **Status:** ✅ Success
+                - **PR:** [#${deploymentEntry.pr}](${context.payload.repository.html_url}/pull/${deploymentEntry.pr})
+                - **Branch:** \`${deploymentEntry.branch}\`
+                - **Deployment URL:** [${deploymentEntry.url}](${deploymentEntry.url})
+                - **Commit:** [\`${deploymentEntry.commit}\`](${context.payload.repository.html_url}/commit/${context.sha})
+                - **Time:** ${deploymentEntry.date}
+                - **Duration:** ${deploymentEntry.duration} minutes
+
+                ## 📊 Global Deployment Log
+                | Date | Commit | Changes | PR | Branch | Status | URL | Logs | Minutes |
+                |------|--------|---------|----|---------|-|----|------|-----|
+                ${allDeployments.map(d =>
+                  `| ${d.date} | [\`${d.commit}\`](${context.payload.repository.html_url}/commit/${d.commit}) | ${d.message.split('\n')[0].slice(0, 50)}${d.message.length > 50 ? '...' : ''} | #${d.pr} | \`${d.branch}\` | ${d.status} | [View](${d.url}) | [Logs](${d.logs_url}) | ${d.duration} |`
+                ).join('\n')}
+
+                ## 🔄 Environment Information
+                - **Go Version:** ${process.env.GO_VERSION}
+                - **Environment:** Development
+                - **Project:** GolangTemplate API
+
+                > 🕒 Last Updated: ${formatDate()}
+                `;
+
+                if (existingIssue) {
+                  await github.rest.issues.update({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: existingIssue.number,
+                    body: deploymentHistory
+                  });
+                  console.log(`Updated global development deployment history issue #${existingIssue.number}`);
+                } else {
+                  const newIssue = await github.rest.issues.create({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    title: issueTitle,
+                    body: deploymentHistory,
+                    labels: ['development-deployments', 'devops', 'documentation']
+                  });
+                  console.log(`Created global development deployment history issue #${newIssue.data.number}`);
+                }
+              } catch (error) {
+                console.log(`Error updating global deployment history: ${error.message}`);
+              }
+            }
+
+  error_handling:
+    name: ⚠️ Error Handling
+    needs: [initialize, deploy]
+    runs-on: ubuntu-latest
+    if: failure() && needs.deploy.result == 'failure'
+    steps:
+      - name: 📝 Create Deployment Failure Comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const jakartaTime = () => {
+              const options = {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: 'numeric',
+                minute: 'numeric',
+                hour12: false,
+                timeZone: 'Asia/Jakarta'
+              };
+              return new Date().toLocaleString('en-US', options) + ' (GMT+7)';
+            };
+
+            const errorComment = `
+            ## ❌ Deployment Failed
+
+            ### 📌 Error Details
+            - **Branch:** \`${{ needs.initialize.outputs.branch-name }}\`
+            - **PR:** #${context.issue.number}
+            - **Commit:** [\`${context.sha.slice(0, 7)}\`](${context.payload.repository.html_url}/commit/${context.sha})
+            - **Time:** ${jakartaTime()}
+
+            ### 🔍 Troubleshooting Steps
+            1. Check the [Action logs](${context.payload.repository.html_url}/actions/runs/${context.runId})
+            2. Verify your Vercel configuration
+            3. Ensure all environment variables are set correctly
+            4. Check your API endpoints configuration
+
+            > ⚠️ Please resolve these issues and retry the deployment
+            `;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: errorComment
+            });
