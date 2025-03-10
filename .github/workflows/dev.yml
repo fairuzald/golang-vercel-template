@@ -414,28 +414,31 @@ jobs:
 
                 let previousDeployments = [];
                 if (existingIssue) {
-                  const deploymentTableRegex = /\| (.*?) \| \[(.*?)\].*? \| (.*?) \| #(\d+) \| \`(.*?)\` \| (.*?) \| (.*?) \| (.*?) \| (\d+) \|/g;
+                  const deploymentTableRegex = /\|\s+(.*?)\s+\|\s+\[`(.*?)`\].*?\s+\|\s+(.*?)\s+\|\s+#(\d+)\s+\|\s+`(.*?)`\s+\|\s+(.*?)\s+\|\s+\[(.*?)\]\((.*?)\)\s+\|/g;
                   let match;
                   const existingContent = existingIssue.body;
 
                   while ((match = deploymentTableRegex.exec(existingContent)) !== null) {
                     previousDeployments.push({
-                      date: match[1],
-                      commit: match[2],
-                      message: match[3],
-                      pr: match[4],
-                      branch: match[5],
-                      status: match[6],
-                      url: match[7],
-                      logs_url: match[8],
-                      duration: match[9]
+                      date: match[1].trim(),
+                      commit: match[2].trim(),
+                      message: match[3].trim(),
+                      pr: match[4].trim(),
+                      branch: match[5].trim(),
+                      status: match[6].trim(),
+                      url: match[8].trim()
                     });
                   }
 
-                  previousDeployments = previousDeployments.slice(0, 19);
+                  previousDeployments = previousDeployments.slice(0, 9);
                 }
 
                 const allDeployments = [deploymentEntry, ...previousDeployments];
+
+                const formatMessage = (msg) => {
+                  const firstLine = msg.split('\n')[0];
+                  return firstLine.length > 30 ? firstLine.substring(0, 30) + '...' : firstLine;
+                };
 
                 const deploymentHistory = `
                 # 📊 Development Deployment History
@@ -450,16 +453,16 @@ jobs:
                 - **Duration:** ${deploymentEntry.duration} minutes
 
                 ## 📊 Global Deployment Log
-                | Date | Commit | Changes | PR | Branch | Status | URL | Logs | Minutes |
-                |------|--------|---------|----|---------|-|----|------|-----|
+                | Date | Commit | Changes | PR | Branch | Status | URL |
+                |------|--------|---------|----|---------|----|-----|
                 ${allDeployments.map(d =>
-                  `| ${d.date} | [\`${d.commit}\`](${context.payload.repository.html_url}/commit/${d.commit}) | ${d.message.split('\n')[0].slice(0, 50)}${d.message.length > 50 ? '...' : ''} | #${d.pr} | \`${d.branch}\` | ${d.status} | [View](${d.url}) | [Logs](${d.logs_url}) | ${d.duration} |`
+                  `| ${d.date} | [\`${d.commit}\`](${context.payload.repository.html_url}/commit/${d.commit}) | ${formatMessage(d.message)} | #${d.pr} | \`${d.branch}\` | ${d.status} | [View](${d.url}) |`
                 ).join('\n')}
 
                 ## 🔄 Environment Information
                 - **Go Version:** ${process.env.GO_VERSION}
                 - **Environment:** Development
-                - **Project:** GolangTemplate API
+                - **Project:** Golang Template API
 
                 > 🕒 Last Updated: ${formatDate()}
                 `;
